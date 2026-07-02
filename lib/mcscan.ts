@@ -12,6 +12,14 @@ import { customAlphabet } from "nanoid";
  * A "square" is a 10×10 ft scan cell = 100 SF.
  */
 
+export interface ScanSection {
+  name: string;
+  wetSq: number;
+  dampSq: number;
+  drySq: number;
+  undSq: number;
+}
+
 export interface McScanData {
   // Building & job
   buildingName: string;
@@ -24,11 +32,14 @@ export interface McScanData {
   insulation: string;
   sections: string;
   method: string;
-  // Moisture scan results (squares)
+  // Moisture scan results (squares). When the roof has multiple sections,
+  // scanSections carries the per-section counts and the flat fields hold the
+  // property-wide sums (kept for older reports and API consumers).
   wetSq: number;
   dampSq: number;
   drySq: number;
   undSq: number;
+  scanSections?: ScanSection[];
   // Photos (data URLs; empty string = not provided)
   coverPhoto: string;
   overlayImg: string;
@@ -46,6 +57,24 @@ export interface McScanData {
 export interface StoredReport extends McScanData {
   id: string;
   createdAt: string;
+  /** Regina checked "client fills in the findings" when creating the link. */
+  clientFillsFindings?: boolean;
+  /** Set when the client saves their findings — the report is locked from then on. */
+  findingsSubmittedAt?: string;
+}
+
+/** The "Findings & diagnosis" section — what a client completes when Regina
+ *  delegates the findings. Everything else is locked at creation. */
+export const FINDINGS_FIELDS = [
+  "analysis",
+  "diagHeadline",
+  "diagText",
+  "recommended",
+] as const;
+export type FindingsFields = Pick<McScanData, (typeof FINDINGS_FIELDS)[number]>;
+
+export function isAwaitingFindings(report: StoredReport): boolean {
+  return !!report.clientFillsFindings && !report.findingsSubmittedAt;
 }
 
 export const OPTION_TITLES = [
@@ -172,15 +201,57 @@ export interface ComputeOptions {
 export function computeVals(data: Partial<McScanData>, opts: ComputeOptions = {}): TemplateValues {
   const d: McScanData = { ...SAMPLE, ...data };
 
-  const wetSq = +d.wetSq || 0;
-  const dampSq = +d.dampSq || 0;
-  const drySq = +d.drySq || 0;
-  const undSq = +d.undSq || 0;
+  // Per-section counts when present; otherwise the flat fields are one section.
+  const scanSections: ScanSection[] =
+    Array.isArray(d.scanSections) && d.scanSections.length > 0
+      ? d.scanSections
+      : [
+          {
+            name: "Roof",
+            wetSq: +d.wetSq || 0,
+            dampSq: +d.dampSq || 0,
+            drySq: +d.drySq || 0,
+            undSq: +d.undSq || 0,
+          },
+        ];
+
+  // The property-wide overall — every existing stat in the report reads these.
+  const wetSq = scanSections.reduce((n, s) => n + (+s.wetSq || 0), 0);
+  const dampSq = scanSections.reduce((n, s) => n + (+s.dampSq || 0), 0);
+  const drySq = scanSections.reduce((n, s) => n + (+s.drySq || 0), 0);
+  const undSq = scanSections.reduce((n, s) => n + (+s.undSq || 0), 0);
   const totSq = wetSq + dampSq + drySq + undSq;
   const divTot = totSq || 1; // avoid div-by-zero; displayed totals use totSq
   const pc = (n: number) => Math.round((n / divTot) * 100);
   const totalSF = totSq * 100;
   const areaStr = `${fmt(totalSF)} SF`;
+
+  // Section-by-section table (sheet 07) — shown when there is more than one.
+  const sectionRows = scanSections.map((s, i) => {
+    const w = +s.wetSq || 0;
+    const dm = +s.dampSq || 0;
+    const dr = +s.drySq || 0;
+    const u = +s.undSq || 0;
+    const tot = w + dm + dr + u;
+    return {
+      name: s.name?.trim() || `Section ${i + 1}`,
+      sf: fmt(tot * 100),
+      wet: fmt(w * 100),
+      damp: fmt(dm * 100),
+      dry: fmt(dr * 100),
+      und: fmt(u * 100),
+      pct: `${Math.round(((w + dm) / (tot || 1)) * 100)}%`,
+    };
+  });
+  const sectionsTotal = {
+    sf: fmt(totalSF),
+    wet: fmt(wetSq * 100),
+    damp: fmt(dampSq * 100),
+    dry: fmt(drySq * 100),
+    und: fmt(undSq * 100),
+    pct: `${pc(wetSq) + pc(dampSq)}%`,
+  };
+  const hasMultipleSections = scanSections.length > 1;
 
   const rows = [
     { cls: "Wet", sq: fmt(wetSq), sf: fmt(wetSq * 100), pct: `${pc(wetSq)}%`, cond: "Moisture confirmed within the insulation layer", c: "#F01F1F" },
@@ -244,8 +315,16 @@ export function computeVals(data: Partial<McScanData>, opts: ComputeOptions = {}
     roofType: d.roofType,
     roofArea: areaStr,
     insulation: d.insulation,
-    sections: String(d.sections),
+    sections:
+      Array.isArray(d.scanSections) && d.scanSections.length > 0
+        ? String(d.scanSections.length)
+        : String(d.sections),
     method: d.method,
+    // section-by-section results
+    sectionRows,
+    sectionsTotal,
+    hasMultipleSections,
+    singleSection: !hasMultipleSections,
     analysis: d.analysis,
     diagHeadline: d.diagHeadline,
     diagText: d.diagText,
@@ -288,7 +367,10 @@ export function computeVals(data: Partial<McScanData>, opts: ComputeOptions = {}
     f_preparedFor: d.preparedFor,
     f_roofType: d.roofType,
     f_insulation: d.insulation,
-    f_sections: String(d.sections),
+    f_sections:
+      Array.isArray(d.scanSections) && d.scanSections.length > 0
+        ? String(d.scanSections.length)
+        : String(d.sections),
     f_method: d.method,
     f_wetSq: String(wetSq),
     f_dampSq: String(dampSq),
@@ -337,7 +419,16 @@ const TEXT_LIMITS: Record<string, number> = {
 const PHOTO_FIELDS = ["coverPhoto", "overlayImg", "photo1", "photo2", "photo3", "photo4"] as const;
 const NUM_FIELDS = ["wetSq", "dampSq", "drySq", "undSq"] as const;
 
-export function validateMcScanData(input: unknown): {
+export interface ValidateOptions {
+  /** The findings section may be blank — the client will complete it via the
+   *  report link (Regina checked "client fills in the findings"). */
+  findingsOptional?: boolean;
+}
+
+export function validateMcScanData(
+  input: unknown,
+  opts: ValidateOptions = {},
+): {
   ok: boolean;
   errors: string[];
   value?: McScanData;
@@ -345,6 +436,9 @@ export function validateMcScanData(input: unknown): {
   const errors: string[] = [];
   const src = (input ?? {}) as Record<string, unknown>;
   const out: Record<string, unknown> = {};
+  const optionalKeys: ReadonlySet<string> = opts.findingsOptional
+    ? new Set(FINDINGS_FIELDS)
+    : new Set();
 
   // Text fields are required and non-empty — a missing field is an error, not
   // an invitation to substitute sample content (a report must never silently
@@ -352,6 +446,10 @@ export function validateMcScanData(input: unknown): {
   for (const [key, max] of Object.entries(TEXT_LIMITS)) {
     const v = src[key];
     if (typeof v !== "string" || v.trim() === "") {
+      if (optionalKeys.has(key)) {
+        out[key] = "";
+        continue;
+      }
       errors.push(`${key} is required.`);
       continue;
     }
@@ -362,19 +460,56 @@ export function validateMcScanData(input: unknown): {
     out[key] = v.trim();
   }
 
-  for (const key of NUM_FIELDS) {
-    const raw = src[key];
-    // "" means a cleared form input — the live preview shows it as 0, so store 0
-    const n = raw === "" ? 0 : typeof raw === "string" ? Number(raw) : raw;
-    if (raw == null) {
-      errors.push(`${key} is required.`);
-      continue;
+  // Per-section scan results. When present they are authoritative — the flat
+  // fields are overwritten with the property-wide sums.
+  const rawSections = src.scanSections;
+  if (rawSections != null) {
+    if (!Array.isArray(rawSections) || rawSections.length === 0 || rawSections.length > 60) {
+      errors.push("scanSections must be a list of 1–60 sections.");
+    } else {
+      const sections: ScanSection[] = [];
+      rawSections.forEach((raw, i) => {
+        const s = (raw ?? {}) as Record<string, unknown>;
+        const name =
+          typeof s.name === "string" && s.name.trim() !== ""
+            ? s.name.trim().slice(0, 120)
+            : `Section ${i + 1}`;
+        const nums: Record<string, number> = {};
+        for (const key of NUM_FIELDS) {
+          const rawN = s[key];
+          const n = rawN === "" || rawN == null ? 0 : typeof rawN === "string" ? Number(rawN) : rawN;
+          if (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 1_000_000) {
+            errors.push(`scanSections[${i}].${key} must be a number between 0 and 1,000,000.`);
+            return;
+          }
+          nums[key] = n;
+        }
+        sections.push({ name, wetSq: nums.wetSq, dampSq: nums.dampSq, drySq: nums.drySq, undSq: nums.undSq });
+      });
+      if (sections.length === rawSections.length) {
+        out.scanSections = sections;
+        for (const key of NUM_FIELDS) {
+          out[key] = sections.reduce((n, s) => n + s[key], 0);
+        }
+      }
     }
-    if (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 1_000_000) {
-      errors.push(`${key} must be a number between 0 and 1,000,000.`);
-      continue;
+  }
+
+  if (out.scanSections == null) {
+    for (const key of NUM_FIELDS) {
+      const raw = src[key];
+      // "" means a cleared form input — the live preview shows it as 0, so store 0
+      const n = raw === "" ? 0 : typeof raw === "string" ? Number(raw) : raw;
+      if (raw == null) {
+        errors.push(`${key} is required.`);
+        continue;
+      }
+      if (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 1_000_000) {
+        errors.push(`${key} must be a number between 0 and 1,000,000.`);
+        continue;
+      }
+      out[key] = n;
     }
-    out[key] = n;
   }
 
   for (const key of PHOTO_FIELDS) {
@@ -392,6 +527,7 @@ export function validateMcScanData(input: unknown): {
 
   if (
     typeof out.recommended === "string" &&
+    out.recommended !== "" && // "" only occurs when findings are client-completed
     !OPTION_TITLES.includes(out.recommended as never)
   ) {
     errors.push(`recommended must be one of: ${OPTION_TITLES.join(", ")}.`);
@@ -399,4 +535,36 @@ export function validateMcScanData(input: unknown): {
 
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, errors: [], value: out as unknown as McScanData };
+}
+
+/** Validates the client's findings submission (the delegated section only). */
+export function validateFindings(input: unknown): {
+  ok: boolean;
+  errors: string[];
+  value?: FindingsFields;
+} {
+  const errors: string[] = [];
+  const src = (input ?? {}) as Record<string, unknown>;
+  const out: Record<string, string> = {};
+
+  for (const key of FINDINGS_FIELDS) {
+    const v = src[key];
+    const max = TEXT_LIMITS[key];
+    if (typeof v !== "string" || v.trim() === "") {
+      errors.push(`${key} is required.`);
+      continue;
+    }
+    if (v.length > max) {
+      errors.push(`${key} is too long (max ${max} characters).`);
+      continue;
+    }
+    out[key] = v.trim();
+  }
+
+  if (out.recommended && !OPTION_TITLES.includes(out.recommended as never)) {
+    errors.push(`recommended must be one of: ${OPTION_TITLES.join(", ")}.`);
+  }
+
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, errors: [], value: out as unknown as FindingsFields };
 }

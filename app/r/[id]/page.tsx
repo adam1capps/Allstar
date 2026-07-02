@@ -1,11 +1,12 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getReport } from "@/lib/store";
-import { computeVals } from "@/lib/mcscan";
+import { computeVals, isAwaitingFindings } from "@/lib/mcscan";
 import { renderTemplate } from "@/lib/design/render";
 import { FONTS_CSS, BASE_CSS, PRINT_FIX_CSS, REPORT_TPL } from "@/lib/design/embedded";
 import PrintButton from "./PrintButton";
 import FitSheets from "./FitSheets";
+import FindingsClient from "./FindingsClient";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,11 +32,13 @@ export default async function ReportPage({
   const report = await getReport(params.id);
   if (!report) notFound();
 
-  const vals = computeVals(report, { photoFallback: true });
-  const html = renderTemplate(REPORT_TPL, vals);
+  const awaiting = isAwaitingFindings(report);
 
   return (
-    <div className="print-page-root" style={{ background: "#d7d7db", minHeight: "100vh" }}>
+    <div
+      className="print-page-root"
+      style={{ background: "#d7d7db", minHeight: "100vh" }}
+    >
       <style
         dangerouslySetInnerHTML={{
           __html: FONTS_CSS + "\n" + BASE_CSS + "\n" + PRINT_FIX_CSS,
@@ -79,11 +82,41 @@ export default async function ReportPage({
             {report.buildingName} · {report.scanDate}
           </div>
         </div>
-        <PrintButton />
+        {awaiting ? (
+          <span
+            style={{
+              background: "#E0A10A",
+              color: "#111",
+              font: "700 11.5px 'Open Sans',sans-serif",
+              letterSpacing: ".06em",
+              textTransform: "uppercase",
+              padding: "7px 13px",
+              borderRadius: 999,
+            }}
+          >
+            Findings needed
+          </span>
+        ) : (
+          <PrintButton />
+        )}
       </div>
 
-      <div dangerouslySetInnerHTML={{ __html: html }} />
-      <FitSheets />
+      {awaiting ? (
+        // The findings panel renders (and live-updates) the report itself.
+        <FindingsClient report={report} />
+      ) : (
+        <>
+          <div
+            dangerouslySetInnerHTML={{
+              __html: renderTemplate(
+                REPORT_TPL,
+                computeVals(report, { photoFallback: true }),
+              ),
+            }}
+          />
+          <FitSheets />
+        </>
+      )}
     </div>
   );
 }

@@ -132,6 +132,128 @@ for (const key of ["analysis", "diagHeadline", "diagText"]) {
   fittedReportTpl = fittedReportTpl.replace(re, `$1 data-fit$2`);
 }
 
+// --- multi-section support ----------------------------------------------------
+
+// Report, sheet 07: the classification table stays for single-section jobs;
+// multi-section jobs get a section-by-section table with an entire-property
+// total row in the same visual language.
+{
+  const tableStart = fittedReportTpl.indexOf("<!-- zone table -->");
+  const photosStart = fittedReportTpl.indexOf("<!-- photo evidence zone -->");
+  if (tableStart < 0 || photosStart < 0 || photosStart < tableStart) {
+    throw new Error("embed-design: sheet-07 zone table anchors not found");
+  }
+  const originalTable = fittedReportTpl.slice(tableStart, photosStart);
+
+  const th = (label, opts = {}) =>
+    `<div style="padding:0 ${opts.edge ? "16px" : "8px"};${opts.left ? "" : "text-align:right;"}` +
+    `font:700 8.5px 'Open Sans',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#C8302F;">${label}</div>`;
+  const td = (expr, opts = {}) =>
+    `<div style="padding:0 ${opts.edge ? "16px" : "8px"};${opts.left ? "" : "text-align:right;"}` +
+    `font-size:12px;${opts.strong ? "font-weight:700;color:#111;font-size:12.5px;" : "color:#333;"}` +
+    `${opts.red ? "font-weight:700;color:#C8302F;" : ""}">${expr}</div>`;
+  const tt = (expr, opts = {}) =>
+    `<div style="padding:0 ${opts.edge ? "16px" : "8px"};${opts.left ? "" : "text-align:right;"}` +
+    `font-weight:800;font-size:12px;color:${opts.red ? "#C8302F" : "#111"};` +
+    `${opts.title ? "font-family:'Exo',sans-serif;font-size:13px;" : ""}">${expr}</div>`;
+  const grid = "display:grid;grid-template-columns:1.7fr .9fr .75fr .78fr .75fr .82fr 1fr;";
+
+  const sectionTable =
+    `<div style="background:#fff;border-radius:16px;box-shadow:0 1px 3px rgba(17,17,17,.05),0 10px 26px rgba(17,17,17,.05);overflow:hidden;">` +
+    `<div style="${grid}background:#FBEDEC;padding:11px 0;">` +
+    th("Section", { edge: true, left: true }) +
+    th("Area (SF)") +
+    th("Wet (SF)") +
+    th("Damp (SF)") +
+    th("Dry (SF)") +
+    th("Undet. (SF)") +
+    th("Moisture", { edge: true }) +
+    `</div>` +
+    `<sc-for list="{{sectionRows}}" as="s" hint-placeholder-count="3">` +
+    `<div style="${grid}align-items:center;border-top:1px solid #EFEFF1;padding:12px 0;">` +
+    td("{{s.name}}", { edge: true, left: true, strong: true }) +
+    td("{{s.sf}}") +
+    td("{{s.wet}}") +
+    td("{{s.damp}}") +
+    td("{{s.dry}}") +
+    td("{{s.und}}") +
+    td("{{s.pct}}", { edge: true, red: true }) +
+    `</div>` +
+    `</sc-for>` +
+    `<div style="${grid}align-items:center;border-top:2px solid #111;padding:13px 0;background:#FAFAFB;">` +
+    tt("Entire property", { edge: true, left: true, title: true }) +
+    tt("{{sectionsTotal.sf}}") +
+    tt("{{sectionsTotal.wet}}") +
+    tt("{{sectionsTotal.damp}}") +
+    tt("{{sectionsTotal.dry}}") +
+    tt("{{sectionsTotal.und}}") +
+    tt("{{sectionsTotal.pct}}", { edge: true, red: true }) +
+    `</div>` +
+    `</div> `;
+
+  fittedReportTpl =
+    fittedReportTpl.slice(0, tableStart) +
+    `<sc-if value="{{singleSection}}">` +
+    originalTable +
+    `</sc-if>` +
+    `<sc-if value="{{hasMultipleSections}}">` +
+    sectionTable +
+    `</sc-if>` +
+    fittedReportTpl.slice(photosStart);
+}
+
+// Builder: the fixed 4-input scan grid becomes a dynamic per-section list the
+// client runtime renders into (BuilderClient owns add/remove/edit).
+{
+  const anchor = builderTpl.indexOf("Moisture scan results");
+  const gridStart = builderTpl.indexOf(
+    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:11px;">',
+    anchor,
+  );
+  if (anchor < 0 || gridStart < 0) {
+    throw new Error("embed-design: builder scan-results grid not found");
+  }
+  // balanced-div scan for the grid's end
+  let depth = 0;
+  let i = gridStart;
+  const tag = /<div\b|<\/div>/g;
+  tag.lastIndex = gridStart;
+  let end = -1;
+  for (let m; (m = tag.exec(builderTpl)); ) {
+    depth += m[0] === "</div>" ? -1 : 1;
+    if (depth === 0) {
+      end = m.index + m[0].length;
+      break;
+    }
+  }
+  if (end < 0) throw new Error("embed-design: unbalanced scan-results grid");
+  builderTpl =
+    builderTpl.slice(0, gridStart) +
+    `<div data-sections-ui></div>` +
+    builderTpl.slice(end);
+
+  builderTpl = builderTpl.replace(
+    "Enter how many 100-SF squares fell in each band.",
+    "Enter how many 100-SF squares fell in each band. Add a section for each roof area — totals roll up automatically.",
+  );
+
+  // The roof-facts "Sections" count is derived from the list below.
+  builderTpl = builderTpl.replace(
+    '<input type="number" min="0" data-key="sections"',
+    '<input type="number" min="0" readonly title="Calculated from the scan sections" data-key="sections"',
+  );
+  if (!builderTpl.includes('readonly title="Calculated from the scan sections"')) {
+    // the sections input may not be type=number — fall back to the data-key anchor
+    builderTpl = builderTpl.replace(
+      /<input([^>]*data-key="sections")/,
+      "<input readonly title=\"Calculated from the scan sections\"$1",
+    );
+  }
+  if (!builderTpl.includes("data-sections-ui")) {
+    throw new Error("embed-design: sections UI placeholder missing after transform");
+  }
+}
+
 // --- emit -------------------------------------------------------------------
 
 const banner =
