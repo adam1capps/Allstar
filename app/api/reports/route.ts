@@ -42,7 +42,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid or incomplete body." }, { status: 400 });
   }
 
-  const { ok, errors, value } = validateMcScanData(body);
+  const clientFillsFindings =
+    (body as Record<string, unknown> | null)?.clientFillsFindings === true;
+
+  const { ok, errors, value } = validateMcScanData(body, {
+    findingsOptional: clientFillsFindings,
+  });
   if (!ok || !value) {
     return NextResponse.json({ error: "Validation failed.", errors }, { status: 400 });
   }
@@ -51,6 +56,7 @@ export async function POST(req: NextRequest) {
     ...value,
     id: generateReportId(),
     createdAt: new Date().toISOString(),
+    ...(clientFillsFindings ? { clientFillsFindings: true } : {}),
   };
 
   try {

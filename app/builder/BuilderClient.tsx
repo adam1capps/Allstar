@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { computeVals, SAMPLE, type McScanData } from "@/lib/mcscan";
+import { computeVals, SAMPLE, type McScanData, type ScanSection } from "@/lib/mcscan";
 import { renderTemplate } from "@/lib/design/render";
 import { fitSheets } from "@/lib/design/fit";
 import { BASE_CSS, PRINT_FIX_CSS, BUILDER_TPL, REPORT_TPL } from "@/lib/design/embedded";
@@ -53,6 +53,35 @@ const BG_FOR_PHOTO: Record<PhotoKey, string> = {
 const STORAGE_KEY = "mcScanData";
 const PASSWORD_KEY = "builderPassword";
 
+const SEC_BANDS = [
+  ["wetSq", "Wet", "#F01F1F"],
+  ["dampSq", "Damp", "#FFD84D"],
+  ["drySq", "Dry", "#00BD70"],
+  ["undSq", "Undet.", "#D7D8DC"],
+] as const;
+
+const numOr = (v: unknown, fallback: number): number => {
+  const n = typeof v === "string" && v !== "" ? Number(v) : v;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+
+/** Jobs saved before multi-section support carry flat counts — one section. */
+function ensureSections(job: Partial<McScanData>): void {
+  if (Array.isArray(job.scanSections) && job.scanSections.length > 0) return;
+  job.scanSections = [
+    {
+      name: "Section 1",
+      wetSq: numOr(job.wetSq, SAMPLE.wetSq),
+      dampSq: numOr(job.dampSq, SAMPLE.dampSq),
+      drySq: numOr(job.drySq, SAMPLE.drySq),
+      undSq: numOr(job.undSq, SAMPLE.undSq),
+    },
+  ];
+}
+
+const escapeAttr = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+
 export default function BuilderClient() {
   const formRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -65,10 +94,11 @@ export default function BuilderClient() {
     | { kind: "link"; url: string; copied?: boolean }
   >({ kind: "closed" });
   const passwordRef = useRef<HTMLInputElement>(null);
+  const [clientFills, setClientFills] = useState(false);
 
   /** Fields still carrying the untouched sample-job content — a real report
    *  should not silently ship another building's data. */
-  function untouchedSampleFields(): string[] {
+  function untouchedSampleFieldsFor(delegateFindings: boolean): string[] {
     const job = { ...SAMPLE, ...jobRef.current };
     const labels: Array<[keyof McScanData, string]> = [
       ["buildingName", "building name"],
@@ -84,8 +114,14 @@ export default function BuilderClient() {
       ["photo3", "photo 3"],
       ["photo4", "photo 4"],
     ];
+    const delegated = new Set(
+      delegateFindings ? ["analysis", "diagText", "diagHeadline", "recommended"] : [],
+    );
     return labels
-      .filter(([key]) => job[key] === SAMPLE[key] && SAMPLE[key] !== "")
+      .filter(
+        ([key]) =>
+          !delegated.has(key) && job[key] === SAMPLE[key] && SAMPLE[key] !== "",
+      )
       .map(([, label]) => label);
   }
 
@@ -115,6 +151,9 @@ export default function BuilderClient() {
     root.querySelectorAll<HTMLElement>("[data-live]").forEach((el) => {
       el.textContent = String(vals[el.dataset.live as string] ?? "");
     });
+    // the roof-facts "Sections" count is derived from the scan sections list
+    const sectionsInput = root.querySelector<HTMLInputElement>('input[data-key="sections"]');
+    if (sectionsInput) sectionsInput.value = String(vals.f_sections ?? "");
     for (const key of PHOTO_KEYS) {
       const zone = root.querySelector<HTMLElement>(`label[data-key="${key}"]`);
       if (zone) zone.style.background = String(vals[BG_FOR_PHOTO[key]]);
@@ -143,7 +182,40 @@ export default function BuilderClient() {
       const key = sel.dataset.key as keyof McScanData;
       sel.value = String(vals[`f_${key}`] ?? "");
     });
+    renderSectionsUI();
     refreshComputed();
+  }
+
+  /** The per-section scan inputs (rebuilt on add/remove, not on typing). */
+  function renderSectionsUI() {
+    const host = formRef.current?.querySelector<HTMLElement>("[data-sections-ui]");
+    if (!host) return;
+    const sections = (jobRef.current.scanSections ?? []) as ScanSection[];
+    const inputCss =
+      "width:100%;padding:9px 11px;border:1px solid #D8D8DD;border-radius:8px;" +
+      "font:700 14px 'Open Sans',sans-serif;color:#111;background:#fff;";
+    const chip = (color: string) =>
+      `<span style="width:11px;height:11px;border-radius:3px;background:${color};display:inline-block;flex:none;"></span>`;
+    const label = (text: string, color?: string) =>
+      `<div style="display:flex;align-items:center;gap:6px;font:700 10.5px 'Open Sans',sans-serif;letter-spacing:.04em;text-transform:uppercase;color:#7A7A7A;">${color ? chip(color) : ""}${text}</div>`;
+    const grid = "display:grid;grid-template-columns:1.6fr repeat(4,1fr) 30px;gap:11px;align-items:center;";
+
+    let html = `<div style="${grid}margin-bottom:6px;">${label("Section")}${SEC_BANDS.map(([, name, color]) => label(name, color)).join("")}<span></span></div>`;
+    sections.forEach((s, i) => {
+      html +=
+        `<div style="${grid}margin-bottom:9px;">` +
+        `<input data-sec-idx="${i}" data-sec-field="name" value="${escapeAttr(s.name || "")}" placeholder="Section ${i + 1}" style="${inputCss}font-weight:400;">` +
+        SEC_BANDS.map(
+          ([field]) =>
+            `<input type="number" min="0" data-sec-idx="${i}" data-sec-field="${field}" value="${numOr(s[field], 0)}" style="${inputCss}">`,
+        ).join("") +
+        (sections.length > 1
+          ? `<button type="button" data-action="removeSection" data-sec-idx="${i}" title="Remove section" style="width:26px;height:26px;border-radius:50%;border:none;background:#EFEFF1;color:#8A1F1F;font-size:13px;cursor:pointer;line-height:1;">✕</button>`
+          : `<span></span>`) +
+        `</div>`;
+    });
+    html += `<button type="button" data-action="addSection" style="background:none;border:1px dashed #D8B7B6;color:#C8302F;font:700 12px 'Open Sans',sans-serif;padding:9px 14px;border-radius:9px;cursor:pointer;">+ Add section</button>`;
+    host.innerHTML = html;
   }
 
   // ------------------------------------------------------------------- state
@@ -163,6 +235,7 @@ export default function BuilderClient() {
   }
 
   function setJob(job: Partial<McScanData>) {
+    ensureSections(job);
     jobRef.current = job;
     save();
     renderForm();
@@ -300,16 +373,25 @@ export default function BuilderClient() {
   }
 
   async function createLink(password: string) {
-    const sampleFields = untouchedSampleFields();
+    const sampleFields = untouchedSampleFieldsFor(clientFills);
     setDialog({ kind: "password", busy: true, sampleFields });
     try {
+      const payload: Record<string, unknown> = { ...SAMPLE, ...jobRef.current };
+      if (clientFills) {
+        // the client completes these via the report link — never send drafts
+        payload.clientFillsFindings = true;
+        payload.analysis = "";
+        payload.diagHeadline = "";
+        payload.diagText = "";
+        payload.recommended = "";
+      }
       const res = await fetch("/api/reports", {
         method: "POST",
         headers: {
           "content-type": "application/json",
           "x-builder-password": password,
         },
-        body: JSON.stringify({ ...SAMPLE, ...jobRef.current }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -360,6 +442,7 @@ export default function BuilderClient() {
         }
       } catch {}
     }
+    ensureSections(initial);
     jobRef.current = initial;
     renderForm();
     renderPreview();
@@ -386,6 +469,18 @@ export default function BuilderClient() {
         t.value = "";
         return;
       }
+      if (t.dataset.secField != null && t.dataset.secIdx != null) {
+        const idx = Number(t.dataset.secIdx);
+        const sections = jobRef.current.scanSections;
+        if (Array.isArray(sections) && sections[idx]) {
+          const field = t.dataset.secField as keyof ScanSection;
+          if (field === "name") sections[idx].name = t.value;
+          else sections[idx][field] = numOr(t.value, 0);
+          refreshComputed();
+          schedulePreview();
+        }
+        return;
+      }
       if (t.dataset.key) setField(t.dataset.key, t.value);
     };
 
@@ -399,8 +494,29 @@ export default function BuilderClient() {
       else if (action === "downloadReport") void downloadReport();
       else if (action === "downloadJob") downloadJob();
       else if (action === "resetAll") resetAll();
-      else if (action === "createLink") {
-        setDialog({ kind: "password", sampleFields: untouchedSampleFields() });
+      else if (action === "addSection") {
+        const sections = (jobRef.current.scanSections ??= []);
+        sections.push({
+          name: `Section ${sections.length + 1}`,
+          wetSq: 0,
+          dampSq: 0,
+          drySq: 0,
+          undSq: 0,
+        });
+        renderSectionsUI();
+        refreshComputed();
+        schedulePreview();
+      } else if (action === "removeSection") {
+        const idx = Number(el.dataset.secIdx);
+        const sections = jobRef.current.scanSections;
+        if (Array.isArray(sections) && sections.length > 1) {
+          sections.splice(idx, 1);
+          renderSectionsUI();
+          refreshComputed();
+          schedulePreview();
+        }
+      } else if (action === "createLink") {
+        setDialog({ kind: "password", sampleFields: untouchedSampleFieldsFor(clientFills) });
       } else if (el.dataset.key) {
         // photo ✕ clear button
         e.preventDefault();
@@ -473,6 +589,39 @@ export default function BuilderClient() {
                 This saves the report and returns a permanent link you can send
                 to the client.
               </p>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 10,
+                  margin: "0 0 14px",
+                  padding: "11px 13px",
+                  borderRadius: 8,
+                  background: clientFills ? "#E9F9F1" : "#F6F6F8",
+                  border: `1px solid ${clientFills ? "#9ADFC0" : "#E3E3E5"}`,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={clientFills}
+                  onChange={(e) => {
+                    setClientFills(e.target.checked);
+                    setDialog((d) =>
+                      d.kind === "password"
+                        ? { ...d, sampleFields: untouchedSampleFieldsFor(e.target.checked) }
+                        : d,
+                    );
+                  }}
+                  style={{ marginTop: 2, width: 16, height: 16, accentColor: "#00BD70" }}
+                />
+                <span style={{ fontSize: 13, color: "#333", lineHeight: 1.45 }}>
+                  <strong>Client fills in the findings.</strong> The link opens
+                  with only the Findings &amp; diagnosis section to complete —
+                  everything else is locked. Once they save, the whole report
+                  locks permanently.
+                </span>
+              </label>
               {!!dialog.sampleFields?.length && (
                 <p
                   style={{

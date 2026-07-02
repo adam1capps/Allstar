@@ -17,7 +17,30 @@ The report and builder UI come **directly from the Claude Design file
 | `/builder` | The design's own MC Scan generator UI: form on top, live report preview below. Adds a **Create shareable link** action (password-protected) plus the design's Print / Download report / Save job / Load job / Reset actions. |
 | `/r/<id>` | Permanent public report link (server-rendered). Unguessable 12-char id. Print / Save as PDF built in. |
 | `POST /api/reports` | Validates and stores a report in **Netlify Blobs**; returns `{ id, path }`. Gated by the `BUILDER_PASSWORD` env var (header `x-builder-password`). |
+| `POST /api/reports/<id>/findings` | The client's one-shot findings submission (see below) — locks the report permanently. |
 | `GET /api/reports/<id>` | Raw report JSON (used for future Roof MRI App / Allstar Chart integration). |
+
+### Multi-section scans
+
+The builder's Moisture scan results is a per-section list (**+ Add section**,
+name + wet/damp/dry/undetermined squares each). All report stats — the
+"What the scan found" card, total surveyed, percentages — automatically become
+the **entire-property overall**, and reports with more than one section swap
+sheet 07's classification table for a **section-by-section table with an
+Entire property total row**. Single-section reports render exactly as the
+original design. (`scanSections` in the API payload; the flat `wetSq…undSq`
+fields still work and are stored as the property-wide sums.)
+
+### Client-completed findings
+
+Checking **"Client fills in the findings"** in the Create-link dialog stores
+the report with the Findings & diagnosis section blank and unlocked. The
+permanent link then opens with a "Complete the findings" panel (moisture
+analysis, diagnosis headline/detail, recommended option) above the
+live-updating report; everything else is locked. Saving requires an explicit
+confirmation and **locks the report permanently** — enforced server-side
+(`409` on any later submission). No password is involved: possession of the
+unguessable link is the credential, same as viewing.
 
 ## The design pipeline
 
