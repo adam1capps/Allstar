@@ -27,3 +27,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# generated from lib/design/*.html|css by scripts/embed-design.mjs
+lib/design/embedded.ts

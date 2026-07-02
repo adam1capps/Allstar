@@ -1,5 +1,5 @@
 import { getStore } from "@netlify/blobs";
-import type { StoredReport } from "./report";
+import type { StoredReport } from "./mcscan";
 
 /**
  * Report persistence backed by Netlify Blobs.

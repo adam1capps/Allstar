@@ -10,30 +10,10 @@ body {
   @apply bg-slate-50 text-brand-ink antialiased;
 }
 
-/* Print rules: when the client prints / saves the report as PDF, hide app
-   chrome and controls, and let the report fill the page cleanly. */
+/* Controls that must never appear in printed output (report pages carry their
+   own full print stylesheet — see lib/design/print-fix.css). */
 @media print {
-  @page {
-    size: A4;
-    margin: 14mm;
-  }
-
   .no-print {
     display: none !important;
-  }
-
-  body {
-    background: #fff !important;
-  }
-
-  .print-container {
-    box-shadow: none !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    max-width: none !important;
-  }
-
-  .avoid-break {
-    break-inside: avoid;
   }
 }
