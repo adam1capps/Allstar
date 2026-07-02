@@ -32,16 +32,21 @@ const escapeHtml = (s: string) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const hasOwn = (obj: object, key: string) =>
+  Object.prototype.hasOwnProperty.call(obj, key);
+
 function lookup(path: string, scopes: Scope[]): unknown {
   const trimmed = path.trim();
   if (trimmed === "true") return true;
   if (trimmed === "false") return false;
   const [head, ...rest] = trimmed.split(".");
   for (let i = scopes.length - 1; i >= 0; i--) {
-    if (head in scopes[i]) {
+    // own properties only — placeholders must never walk the prototype chain
+    // ({{constructor}}, {{__proto__}}, …)
+    if (hasOwn(scopes[i], head)) {
       let v: unknown = scopes[i][head];
       for (const part of rest) {
-        if (v == null) return undefined;
+        if (v == null || typeof v !== "object" || !hasOwn(v, part)) return undefined;
         v = (v as Record<string, unknown>)[part];
       }
       return v;

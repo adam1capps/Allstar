@@ -121,6 +121,14 @@ const COMP_ROWS = [
   { c: "Repeatable, audit-grade record", mri: "y", ir: "p", imp: "n" },
 ] as const;
 
+// Fully constant — derived once, not per computeVals call.
+const COMP_ROWS_RENDERED = COMP_ROWS.map((r) => ({
+  c: r.c,
+  mri: glyph(r.mri, true),
+  ir: glyph(r.ir, false),
+  imp: glyph(r.imp, false),
+}));
+
 const SCALE_BANDS = [
   { name: "Dry", range: "0 – 10", desc: "Baseline. No elevated moisture detected.", sw: "#EDEFF2", fg: "#4D4D4D", bar: "#EDEFF2" },
   { name: "Dry to Touch", range: "10 – 35", desc: "Surface-dry with only trace sub-surface moisture. Monitor.", sw: "#F3C9C7", fg: "#7A2A28", bar: "#F3C9C7" },
@@ -168,17 +176,11 @@ export function computeVals(data: Partial<McScanData>, opts: ComputeOptions = {}
   const dampSq = +d.dampSq || 0;
   const drySq = +d.drySq || 0;
   const undSq = +d.undSq || 0;
-  const totSq = wetSq + dampSq + drySq + undSq || 1;
-  const pc = (n: number) => Math.round((n / totSq) * 100);
+  const totSq = wetSq + dampSq + drySq + undSq;
+  const divTot = totSq || 1; // avoid div-by-zero; displayed totals use totSq
+  const pc = (n: number) => Math.round((n / divTot) * 100);
   const totalSF = totSq * 100;
   const areaStr = `${fmt(totalSF)} SF`;
-
-  const compRows = COMP_ROWS.map((r) => ({
-    c: r.c,
-    mri: glyph(r.mri, true),
-    ir: glyph(r.ir, false),
-    imp: glyph(r.imp, false),
-  }));
 
   const rows = [
     { cls: "Wet", sq: fmt(wetSq), sf: fmt(wetSq * 100), pct: `${pc(wetSq)}%`, cond: "Moisture confirmed within the insulation layer", c: "#F01F1F" },
@@ -210,14 +212,23 @@ export function computeVals(data: Partial<McScanData>, opts: ComputeOptions = {}
     { k: "Undetermined", pct: `${pc(undSq)}%`, sf: `${fmt(undSq * 100)} SF`, sq: `${fmt(undSq)} sq`, c: "#D7D8DC" },
   ];
 
+  // computeVals also runs on unvalidated builder-side data (?job= import,
+  // loaded job files, localStorage), so photo values are re-checked here —
+  // this is the single choke point before they reach <img src> or CSS url().
+  const safeSrc = (src: string) =>
+    typeof src === "string" && (DATA_IMAGE_RE.test(src) || SAMPLE_PHOTO_PATHS.has(src))
+      ? src
+      : "";
   const photo = (src: string) =>
-    src || (opts.photoFallback ? PHOTO_PLACEHOLDER : "");
-  const zoneBg = (src: string, empty: string, fit: "cover" | "contain") =>
-    src ? `#eee url('${src}') center/${fit} no-repeat` : empty;
+    safeSrc(src) || (opts.photoFallback ? PHOTO_PLACEHOLDER : "");
+  const zoneBg = (src: string, empty: string, fit: "cover" | "contain") => {
+    const safe = safeSrc(src);
+    return safe ? `#eee url('${safe}') center/${fit} no-repeat` : empty;
+  };
 
   return {
     // fixed content
-    compRows,
+    compRows: COMP_ROWS_RENDERED,
     scaleBands: SCALE_BANDS,
     options,
     steps: STEPS,
@@ -335,14 +346,13 @@ export function validateMcScanData(input: unknown): {
   const src = (input ?? {}) as Record<string, unknown>;
   const out: Record<string, unknown> = {};
 
+  // Text fields are required and non-empty — a missing field is an error, not
+  // an invitation to substitute sample content (a report must never silently
+  // carry another job's data). The builder always sends complete objects.
   for (const [key, max] of Object.entries(TEXT_LIMITS)) {
     const v = src[key];
-    if (v == null) {
-      out[key] = SAMPLE[key as keyof McScanData];
-      continue;
-    }
-    if (typeof v !== "string") {
-      errors.push(`${key} must be a string.`);
+    if (typeof v !== "string" || v.trim() === "") {
+      errors.push(`${key} is required.`);
       continue;
     }
     if (v.length > max) {
@@ -354,9 +364,10 @@ export function validateMcScanData(input: unknown): {
 
   for (const key of NUM_FIELDS) {
     const raw = src[key];
-    const n = typeof raw === "string" && raw !== "" ? Number(raw) : raw;
-    if (n == null || n === "") {
-      out[key] = SAMPLE[key];
+    // "" means a cleared form input — the live preview shows it as 0, so store 0
+    const n = raw === "" ? 0 : typeof raw === "string" ? Number(raw) : raw;
+    if (raw == null) {
+      errors.push(`${key} is required.`);
       continue;
     }
     if (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 1_000_000) {
@@ -379,8 +390,11 @@ export function validateMcScanData(input: unknown): {
     out[key] = v;
   }
 
-  if (typeof out.recommended === "string" && !OPTION_TITLES.includes(out.recommended as never)) {
-    out.recommended = "Spot Dry-Out";
+  if (
+    typeof out.recommended === "string" &&
+    !OPTION_TITLES.includes(out.recommended as never)
+  ) {
+    errors.push(`recommended must be one of: ${OPTION_TITLES.join(", ")}.`);
   }
 
   if (errors.length > 0) return { ok: false, errors };

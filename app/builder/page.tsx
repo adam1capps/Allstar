@@ -1,11 +1,5 @@
 import type { Metadata } from "next";
-import {
-  FONTS_CSS,
-  BASE_CSS,
-  PRINT_FIX_CSS,
-  BUILDER_TPL,
-  REPORT_TPL,
-} from "@/lib/design/embedded";
+import { FONTS_CSS, BASE_CSS, PRINT_FIX_CSS } from "@/lib/design/embedded";
 import BuilderClient from "./BuilderClient";
 
 export const metadata: Metadata = {
@@ -21,7 +15,7 @@ export default function BuilderPage() {
           __html: FONTS_CSS + "\n" + BASE_CSS + "\n" + PRINT_FIX_CSS,
         }}
       />
-      <BuilderClient builderTpl={BUILDER_TPL} reportTpl={REPORT_TPL} />
+      <BuilderClient />
     </div>
   );
 }
