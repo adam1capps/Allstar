@@ -35,7 +35,11 @@ export async function saveReport(report: StoredReport): Promise<void> {
 
 export async function getReport(id: string): Promise<StoredReport | null> {
   if (blobsAvailable()) {
-    const store = getStore(STORE_NAME);
+    // Strong consistency matters: the findings endpoint's lock check reads a
+    // report that may have been written moments earlier by another function
+    // invocation — an eventually-consistent read could miss the lock and let
+    // a second submission through.
+    const store = getStore({ name: STORE_NAME, consistency: "strong" });
     const data = (await store.get(id, { type: "json" })) as StoredReport | null;
     return data ?? null;
   }
