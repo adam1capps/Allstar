@@ -64,15 +64,66 @@ builderTpl = builderTpl.replace(
   (_, key, content) => content.replace(/<(\w+)/, `<$1 data-if="${key}"`),
 );
 
-// 4. Strip remaining handler placeholders.
-builderTpl = builderTpl.replace(/\son[a-z]+="\{\{[^}]+\}\}"/g, "");
+// 4. Strip the handler placeholders the client runtime replaces with event
+//    delegation. Anything OUTSIDE this allowlist means the design gained new
+//    behavior that nobody wired up — fail the build instead of shipping a
+//    dead control.
+const KNOWN_STRIPPED_HANDLERS = new Set([
+  "onField",
+  "onImgInput",
+  "onImgDrop",
+  "onImgClear",
+  "prevent",
+]);
+const unknownHandlers = [];
+builderTpl = builderTpl.replace(
+  /\son[a-z]+="\{\{\s*([^}]+?)\s*\}\}"/g,
+  (m, name) => {
+    if (!KNOWN_STRIPPED_HANDLERS.has(name)) unknownHandlers.push(name);
+    return "";
+  },
+);
+if (unknownHandlers.length > 0) {
+  throw new Error(
+    `embed-design: unwired template handlers (add delegation in BuilderClient or map to data-action): ${unknownHandlers.join(", ")}`,
+  );
+}
+
+// 5. Structural invariants the client runtime depends on — fail loudly at
+//    build time if a re-extracted design changed shape.
+const PHOTO_KEYS = ["coverPhoto", "overlayImg", "photo1", "photo2", "photo3", "photo4"];
+for (const key of PHOTO_KEYS) {
+  if (!builderTpl.includes(`<label data-key="${key}"`)) {
+    throw new Error(`embed-design: photo drop zone <label data-key="${key}"> missing`);
+  }
+}
+if (!builderTpl.includes('<select data-key="recommended"')) {
+  throw new Error('embed-design: <select data-key="recommended"> missing');
+}
 
 // --- report transforms --------------------------------------------------------
+
+// The design bakes its sample job ("PetSmart — 2997 Max Ave, Bozeman") into a
+// few visible strings and alt texts. Every report must not carry another
+// client's address, so those become generic or template-driven.
+const sampleTextMap = [
+  ['alt="PetSmart — 2997 Max Ave, Bozeman MT"', 'alt="Building cover photo"'],
+  ['alt="Moisture overlay map — 2997 Max Ave"', 'alt="Moisture overlay map"'],
+  [">Moisture Overlay Map · 2997 Max Ave<", ">Moisture Overlay Map<"],
+  ['alt="TPO roof field at 2997 Max Ave"', 'alt="Roof field"'],
+  [">TPO roof field — 2997 Max Ave, Bozeman<", ">{{roofType}} roof field<"],
+];
+let fittedReportTpl = reportTpl;
+for (const [from, to] of sampleTextMap) {
+  if (!fittedReportTpl.includes(from)) {
+    throw new Error(`embed-design: expected report sample text not found: ${from}`);
+  }
+  fittedReportTpl = fittedReportTpl.replace(from, to);
+}
 
 // Mark free-text elements so the fit runtime can shrink them when a job's text
 // is longer than the fixed Letter sheet allows (prevents content spilling into
 // the footer / off the printed page).
-let fittedReportTpl = reportTpl;
 for (const key of ["analysis", "diagHeadline", "diagText"]) {
   const re = new RegExp(`(<[a-z][^>]*)(>\\s*\\{\\{${key}\\}\\})`);
   if (!re.test(fittedReportTpl)) {

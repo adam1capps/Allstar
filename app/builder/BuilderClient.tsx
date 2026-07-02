@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { computeVals, SAMPLE, type McScanData } from "@/lib/mcscan";
 import { renderTemplate } from "@/lib/design/render";
 import { fitSheets } from "@/lib/design/fit";
+import { BASE_CSS, PRINT_FIX_CSS, BUILDER_TPL, REPORT_TPL } from "@/lib/design/embedded";
 
 /**
  * Client runtime for the MC Scan builder.
@@ -19,11 +20,6 @@ import { fitSheets } from "@/lib/design/fit";
  * All interactivity is event delegation on data-key / data-action attributes
  * (the embed step stripped the design's template event handlers).
  */
-
-interface Props {
-  builderTpl: string;
-  reportTpl: string;
-}
 
 const LIVE_KEYS = [
   "wetPct",
@@ -57,7 +53,7 @@ const BG_FOR_PHOTO: Record<PhotoKey, string> = {
 const STORAGE_KEY = "mcScanData";
 const PASSWORD_KEY = "builderPassword";
 
-export default function BuilderClient({ builderTpl, reportTpl }: Props) {
+export default function BuilderClient() {
   const formRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const jobRef = useRef<Partial<McScanData>>({});
@@ -65,23 +61,51 @@ export default function BuilderClient({ builderTpl, reportTpl }: Props) {
 
   const [dialog, setDialog] = useState<
     | { kind: "closed" }
-    | { kind: "password"; error?: string; busy?: boolean }
+    | { kind: "password"; error?: string; busy?: boolean; sampleFields?: string[] }
     | { kind: "link"; url: string; copied?: boolean }
   >({ kind: "closed" });
   const passwordRef = useRef<HTMLInputElement>(null);
+
+  /** Fields still carrying the untouched sample-job content — a real report
+   *  should not silently ship another building's data. */
+  function untouchedSampleFields(): string[] {
+    const job = { ...SAMPLE, ...jobRef.current };
+    const labels: Array<[keyof McScanData, string]> = [
+      ["buildingName", "building name"],
+      ["address", "address"],
+      ["preparedFor", "prepared for"],
+      ["inspector", "inspector"],
+      ["analysis", "moisture analysis"],
+      ["diagText", "diagnosis detail"],
+      ["coverPhoto", "cover photo"],
+      ["overlayImg", "overlay map"],
+      ["photo1", "photo 1"],
+      ["photo2", "photo 2"],
+      ["photo3", "photo 3"],
+      ["photo4", "photo 4"],
+    ];
+    return labels
+      .filter(([key]) => job[key] === SAMPLE[key] && SAMPLE[key] !== "")
+      .map(([, label]) => label);
+  }
 
   // ------------------------------------------------------------------ render
 
   function renderPreview() {
     if (!previewRef.current) return;
     const vals = computeVals(jobRef.current as McScanData, { photoFallback: true });
-    previewRef.current.innerHTML = renderTemplate(reportTpl, vals);
+    previewRef.current.innerHTML = renderTemplate(REPORT_TPL, vals);
     fitSheets(previewRef.current);
   }
 
   function schedulePreview() {
     clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(renderPreview, 250);
+    debounceRef.current = setTimeout(() => {
+      // autosave rides the same debounce — serializing a photo-heavy job on
+      // every keystroke would stall typing
+      save();
+      renderPreview();
+    }, 250);
   }
 
   function refreshComputed() {
@@ -113,7 +137,7 @@ export default function BuilderClient({ builderTpl, reportTpl }: Props) {
       const text = String(vals[k]).replace(/&/g, "&amp;").replace(/</g, "&lt;");
       vals[k] = `<span data-live="${k}">${text}</span>`;
     }
-    root.innerHTML = renderTemplate(builderTpl, vals, { rawKeys });
+    root.innerHTML = renderTemplate(BUILDER_TPL, vals, { rawKeys });
     // selects don't honor value="" attributes in raw HTML
     root.querySelectorAll<HTMLSelectElement>("select[data-key]").forEach((sel) => {
       const key = sel.dataset.key as keyof McScanData;
@@ -134,9 +158,8 @@ export default function BuilderClient({ builderTpl, reportTpl }: Props) {
 
   function setField(key: string, value: string) {
     (jobRef.current as Record<string, unknown>)[key] = value;
-    save();
     refreshComputed();
-    schedulePreview();
+    schedulePreview(); // also persists (debounced)
   }
 
   function setJob(job: Partial<McScanData>) {
@@ -147,10 +170,22 @@ export default function BuilderClient({ builderTpl, reportTpl }: Props) {
   }
 
   function loadImage(key: string, file: File | null | undefined) {
-    if (!file || !/^image\//.test(file.type || "")) return;
+    if (!file) return;
+    const unreadable = () =>
+      window.alert(
+        "That image couldn't be read — please use a JPG, PNG, or WebP photo.",
+      );
+    if (!/^image\//.test(file.type || "")) {
+      unreadable();
+      return;
+    }
     const fr = new FileReader();
+    fr.onerror = unreadable;
     fr.onload = () => {
       const img = new Image();
+      // e.g. HEIC passes the MIME test but the browser can't decode it —
+      // without this the drop would silently do nothing
+      img.onerror = unreadable;
       img.onload = () => {
         // same compression as the design: ≤1500px JPEG q0.82
         const max = 1500;
@@ -235,9 +270,15 @@ export default function BuilderClient({ builderTpl, reportTpl }: Props) {
       const du = await imgToData(live[i].currentSrc || live[i].src);
       cim[i].setAttribute("src", du);
     }
-    const css =
-      "*{box-sizing:border-box;} html,body{margin:0;padding:0;} body{background:#d7d7db;font-family:'Open Sans',sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact;} .mcreport{background:#d7d7db;padding:30px 0 8px;} @page{size:Letter;margin:0;} @media print{ *,*::before,*::after{ -webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;} .mcreport{padding:0 !important;background:#fff !important;} [data-sheet]{box-shadow:none !important;margin:0 !important;border-radius:0 !important;height:1056px !important;min-height:1056px !important;max-height:1056px !important;break-after:page;page-break-after:always;overflow:hidden;} [data-sheet]:last-child{break-after:auto;page-break-after:auto;} body{background:#fff !important;} }";
-    const title = jobRef.current.buildingName || "MC Scan Report";
+    // Reuse the app's own print CSS so the exported file paginates exactly
+    // like the live report. Fonts come from Google's CDN because the export
+    // must be a single self-contained file (self-hosted font paths would
+    // break once the file leaves the site).
+    const css = BASE_CSS + "\n" + PRINT_FIX_CSS;
+    const title = (jobRef.current.buildingName || "MC Scan Report")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
     const html =
       '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' +
       title +
@@ -259,7 +300,8 @@ export default function BuilderClient({ builderTpl, reportTpl }: Props) {
   }
 
   async function createLink(password: string) {
-    setDialog({ kind: "password", busy: true });
+    const sampleFields = untouchedSampleFields();
+    setDialog({ kind: "password", busy: true, sampleFields });
     try {
       const res = await fetch("/api/reports", {
         method: "POST",
@@ -273,6 +315,7 @@ export default function BuilderClient({ builderTpl, reportTpl }: Props) {
       if (!res.ok) {
         setDialog({
           kind: "password",
+          sampleFields,
           error: Array.isArray(data?.errors) && data.errors.length
             ? data.errors.join(" ")
             : data?.error || "Something went wrong.",
@@ -284,7 +327,11 @@ export default function BuilderClient({ builderTpl, reportTpl }: Props) {
       } catch {}
       setDialog({ kind: "link", url: `${window.location.origin}${data.path}` });
     } catch {
-      setDialog({ kind: "password", error: "Network error — please try again." });
+      setDialog({
+        kind: "password",
+        sampleFields,
+        error: "Network error — please try again.",
+      });
     }
   }
 
@@ -316,6 +363,12 @@ export default function BuilderClient({ builderTpl, reportTpl }: Props) {
     jobRef.current = initial;
     renderForm();
     renderPreview();
+    // web fonts change metrics — re-fit the preview once they settle
+    if (document.fonts?.ready) {
+      void document.fonts.ready.then(() => {
+        if (previewRef.current) fitSheets(previewRef.current);
+      });
+    }
 
     const root = formRef.current;
     if (!root) return;
@@ -347,7 +400,7 @@ export default function BuilderClient({ builderTpl, reportTpl }: Props) {
       else if (action === "downloadJob") downloadJob();
       else if (action === "resetAll") resetAll();
       else if (action === "createLink") {
-        setDialog({ kind: "password" });
+        setDialog({ kind: "password", sampleFields: untouchedSampleFields() });
       } else if (el.dataset.key) {
         // photo ✕ clear button
         e.preventDefault();
@@ -420,6 +473,23 @@ export default function BuilderClient({ builderTpl, reportTpl }: Props) {
                 This saves the report and returns a permanent link you can send
                 to the client.
               </p>
+              {!!dialog.sampleFields?.length && (
+                <p
+                  style={{
+                    margin: "0 0 14px",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    background: "#FFF6E5",
+                    border: "1px solid #F0D9A8",
+                    fontSize: 12.5,
+                    color: "#7A5A12",
+                  }}
+                >
+                  Heads up — these still contain the sample job's content:{" "}
+                  <strong>{dialog.sampleFields.join(", ")}</strong>. The client
+                  will see them exactly as shown in the preview.
+                </p>
+              )}
               <input
                 ref={passwordRef}
                 type="password"
@@ -430,7 +500,8 @@ export default function BuilderClient({ builderTpl, reportTpl }: Props) {
                     : ""
                 }
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void createLink(passwordRef.current?.value ?? "");
+                  if (e.key === "Enter" && !dialog.busy)
+                    void createLink(passwordRef.current?.value ?? "");
                 }}
                 autoFocus
                 style={{

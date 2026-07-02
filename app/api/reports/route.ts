@@ -18,19 +18,28 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const raw = await req.text();
-  if (raw.length > MAX_BODY_BYTES) {
+  // Reject oversized payloads from the declared length before buffering the
+  // body; the post-read check backstops requests without a Content-Length.
+  const declared = Number(req.headers.get("content-length") ?? 0);
+  if (declared > MAX_BODY_BYTES) {
     return NextResponse.json(
       { error: "Report is too large — use fewer or smaller photos." },
       { status: 413 },
     );
   }
-
   let body: unknown;
   try {
+    const raw = await req.text();
+    if (raw.length > MAX_BODY_BYTES) {
+      return NextResponse.json(
+        { error: "Report is too large — use fewer or smaller photos." },
+        { status: 413 },
+      );
+    }
     body = JSON.parse(raw);
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+    // covers both a truncated/aborted body stream and malformed JSON
+    return NextResponse.json({ error: "Invalid or incomplete body." }, { status: 400 });
   }
 
   const { ok, errors, value } = validateMcScanData(body);
