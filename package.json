@@ -4,6 +4,9 @@
   "private": true,
   "description": "Builder that generates Allstar Roof MRI reports and permanent shareable links.",
   "scripts": {
+    "embed-design": "node scripts/embed-design.mjs",
+    "predev": "npm run embed-design",
+    "prebuild": "npm run embed-design",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -21,6 +24,8 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.19",
+    "pdf-lib": "^1.17.1",
+    "playwright": "^1.61.1",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.4",
     "typescript": "^5.5.3"

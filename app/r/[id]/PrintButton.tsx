@@ -4,9 +4,20 @@ export default function PrintButton() {
   return (
     <button
       onClick={() => window.print()}
-      className="rounded-lg bg-brand-navy px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-slate"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 7,
+        background: "#C8302F",
+        color: "#fff",
+        border: "none",
+        font: "700 12.5px 'Open Sans',sans-serif",
+        padding: "10px 15px",
+        borderRadius: 9,
+        cursor: "pointer",
+      }}
     >
-      Download PDF
+      Print / Save as PDF
     </button>
   );
 }

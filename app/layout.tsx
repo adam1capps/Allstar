@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { branding } from "@/lib/branding";
 
 export const metadata: Metadata = {
-  title: `${branding.company} ${branding.product} Report Builder`,
-  description: `Generate ${branding.company} ${branding.product} reports and permanent shareable links.`,
+  title: "MC Scan Report Generator — Allstar",
+  description:
+    "Build an Allstar MC Scan moisture report and generate a permanent shareable link.",
   robots: { index: false, follow: false },
 };
 

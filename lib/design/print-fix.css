@@ -1,0 +1,78 @@
+/*
+ * Print hardening for the MC Scan report (ours, applied after the design CSS).
+ *
+ * The design's sheets are Letter-sized at 96dpi (816×1056 px) but declared
+ * with min-height, which lets content spill onto extra pages and produce
+ * blank/near-empty pages in the PDF. These rules lock every sheet to exactly
+ * one Letter page: fixed height, overflow clipped, one page break per sheet,
+ * nothing else printable.
+ */
+@media print {
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  /* Next.js appends this a11y live-region after the content; even at zero
+     height it forces a blank trailing PDF page. Print-only hide. */
+  next-route-announcer {
+    display: none !important;
+  }
+
+  /* The page shells around the report must never add printable height. */
+  .print-page-root {
+    min-height: 0 !important;
+    background: #fff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .mcreport {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #fff !important;
+    min-height: 0 !important;
+  }
+
+  [data-sheet] {
+    width: 816px !important;
+    height: 1056px !important;
+    min-height: 1056px !important;
+    max-height: 1056px !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    break-after: page;
+    page-break-after: always;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  [data-sheet]:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  /* Chromium's paginator tries not to slice images; an image whose box crosses
+     the sheet's clipped bottom edge would otherwise spawn extra pages. The
+     sheet is already exactly one page — never fragment inside it. */
+  [data-sheet] img,
+  [data-sheet] * {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

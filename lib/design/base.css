@@ -1,0 +1,8 @@
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:#d7d7db;font-family:'Open Sans',sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  ::selection{background:#C8302F;color:#fff;}
+  @page{size:Letter;margin:0;}
+  .gen-builder input:focus,.gen-builder textarea:focus,.gen-builder select:focus{outline:none;border-color:#C8302F !important;box-shadow:0 0 0 3px rgba(200,48,47,.12);}
+  @media print{ .gen-builder{display:none !important;} .mcreport{padding:0 !important;background:#fff !important;} [data-sheet]{box-shadow:none !important;margin:0 !important;border-radius:0 !important;break-after:page;overflow:hidden;} [data-sheet]:last-child{break-after:auto;} body{background:#fff !important;} }
