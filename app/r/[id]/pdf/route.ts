@@ -55,7 +55,11 @@ export async function GET(
   } catch (err) {
     console.error("PDF generation failed", err);
     return NextResponse.json(
-      { error: "PDF generation failed — please try again in a moment." },
+      {
+        error: "PDF generation failed — please try again in a moment.",
+        // internal tool: the short error name makes field failures diagnosable
+        detail: String(err).slice(0, 300),
+      },
       { status: 503 },
     );
   }
