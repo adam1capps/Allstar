@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   computeVals,
+  defaultCaptions,
   OPTION_TITLES,
   type FindingsFields,
   type StoredReport,
@@ -44,10 +45,23 @@ const labelStyle: React.CSSProperties = {
   margin: "14px 0 5px",
 };
 
+interface PhotoDraft {
+  photo1?: string;
+  photo2?: string;
+  photo3?: string;
+  photo4?: string;
+  photoCaption1?: string;
+  photoCaption2?: string;
+  photoCaption3?: string;
+  photoCaption4?: string;
+}
+
+const PHOTO_SLOTS = [1, 2, 3, 4] as const;
+
 export default function FindingsClient({ report }: { report: StoredReport }) {
   const previewRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
-  const [draft, setDraft] = useState<FindingsFields>({
+  const [draft, setDraft] = useState<FindingsFields & PhotoDraft>({
     analysis: report.analysis || "",
     diagHeadline: report.diagHeadline || "",
     diagText: report.diagText || "",
@@ -57,11 +71,12 @@ export default function FindingsClient({ report }: { report: StoredReport }) {
     { kind: "editing"; error?: string } | { kind: "saving" } | { kind: "confirm" }
   >({ kind: "editing" });
 
-  function renderPreview(d: FindingsFields) {
+  function renderPreview(d: FindingsFields & PhotoDraft) {
     if (!previewRef.current) return;
     const vals = computeVals(
       {
         ...report,
+        ...d,
         analysis: d.analysis || PLACEHOLDERS.analysis,
         diagHeadline: d.diagHeadline || PLACEHOLDERS.diagHeadline,
         diagText: d.diagText || PLACEHOLDERS.diagText,
@@ -73,7 +88,37 @@ export default function FindingsClient({ report }: { report: StoredReport }) {
     fitSheets(previewRef.current);
   }
 
-  function update(patch: Partial<FindingsFields>) {
+  function loadPhoto(slot: (typeof PHOTO_SLOTS)[number], file: File | null | undefined) {
+    if (!file) return;
+    const unreadable = () =>
+      window.alert("That image couldn't be read — please use a JPG, PNG, or WebP photo.");
+    if (!/^image\//.test(file.type || "")) {
+      unreadable();
+      return;
+    }
+    const fr = new FileReader();
+    fr.onerror = unreadable;
+    fr.onload = () => {
+      const img = new Image();
+      img.onerror = unreadable;
+      img.onload = () => {
+        const max = 1500;
+        const s = Math.min(1, max / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.width * s));
+        c.height = Math.max(1, Math.round(img.height * s));
+        const x = c.getContext("2d")!;
+        x.fillStyle = "#fff";
+        x.fillRect(0, 0, c.width, c.height);
+        x.drawImage(img, 0, 0, c.width, c.height);
+        update({ [`photo${slot}`]: c.toDataURL("image/jpeg", 0.82) });
+      };
+      img.src = fr.result as string;
+    };
+    fr.readAsDataURL(file);
+  }
+
+  function update(patch: Partial<FindingsFields & PhotoDraft>) {
     setDraft((prev) => {
       const next = { ...prev, ...patch };
       clearTimeout(debounceRef.current);
@@ -197,6 +242,93 @@ export default function FindingsClient({ report }: { report: StoredReport }) {
               placeholder="The reasoning behind the recommendation…"
             />
           </label>
+
+          <div style={{ ...labelStyle, marginBottom: 0 }}>
+            Roof photos — optional, replaces the four report photos
+          </div>
+          <p style={{ margin: "3px 0 8px", fontSize: 12, color: "#9A9AA0" }}>
+            Click a photo to replace it with your own; update the caption to
+            match.
+          </p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: 12,
+            }}
+          >
+            {PHOTO_SLOTS.map((n) => {
+              const current =
+                (draft[`photo${n}` as keyof PhotoDraft] as string) ||
+                report[`photo${n}` as keyof StoredReport] as string ||
+                "";
+              const capKey = `photoCaption${n}` as keyof PhotoDraft;
+              const defaultCap =
+                (report[capKey as keyof StoredReport] as string) ||
+                defaultCaptions(report.roofType)[n - 1];
+              return (
+                <div key={n}>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      height: 92,
+                      borderRadius: 10,
+                      border: "2px dashed #D8B7B6",
+                      background: current
+                        ? `#eee url('${current}') center/cover no-repeat`
+                        : "#F2F2F4",
+                      cursor: "pointer",
+                      overflow: "hidden",
+                    }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      loadPhoto(n, e.dataTransfer?.files?.[0]);
+                    }}
+                  >
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        loadPhoto(n, e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                    {!current && (
+                      <span
+                        style={{
+                          font: "700 10.5px 'Open Sans',sans-serif",
+                          color: "#C8302F",
+                          background: "rgba(255,255,255,.9)",
+                          borderRadius: 6,
+                          padding: "5px 9px",
+                        }}
+                      >
+                        Photo {n}
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    style={{
+                      width: "100%",
+                      marginTop: 6,
+                      padding: "6px 8px",
+                      border: "1px solid #D8D8DD",
+                      borderRadius: 7,
+                      font: "400 11px 'Open Sans',sans-serif",
+                      color: "#111",
+                    }}
+                    placeholder={defaultCap}
+                    value={(draft[capKey] as string) ?? ""}
+                    onChange={(e) => update({ [capKey]: e.target.value })}
+                  />
+                </div>
+              );
+            })}
+          </div>
 
           {state.kind === "editing" && state.error && (
             <p

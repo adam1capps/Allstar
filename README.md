@@ -119,3 +119,33 @@ templates pick them up by placeholder name.
 The Roof MRI App / Allstar Chart can file reports directly by POSTing the
 `McScanData` shape (see `lib/mcscan.ts`) to `/api/reports` — same viewer, same
 permanent links, no UI changes needed.
+
+### Report PDFs
+
+Every final report has a real PDF at **`/r/<id>/pdf`** — rendered by headless
+Chromium (one Letter page per sheet, identical to Print / Save as PDF), cached
+in Blobs, and regenerated automatically when a report is edited. Reports still
+awaiting the client's findings return 409 until completed. Surfaced as
+**Download PDF** on the report page, in the create-link dialog, and on the
+Reports page.
+
+### Reports page
+
+**`/builder/reports`** (builder password) lists every created report with its
+status (Final / Awaiting findings), the permanent link, the PDF download, and
+**Edit**.
+
+### Editing a report
+
+**Edit** opens the report back in the builder (`/builder?edit=<id>`) — change
+photos, sections, numbers, text, anything — and **Save changes** updates the
+same permanent link (clients keep their URL; the PDF regenerates). Handled by
+`PUT /api/reports/<id>` (password-gated). The client-findings lock applies to
+the client's one-shot submission; the password holder can always correct a
+report.
+
+### Client photo uploads
+
+When completing the findings, the client can also replace the four evidence
+photos (same drag/drop + compression as the builder) and edit their captions —
+all live-previewed and locked in with the findings.

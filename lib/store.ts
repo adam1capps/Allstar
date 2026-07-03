@@ -45,3 +45,48 @@ export async function getReport(id: string): Promise<StoredReport | null> {
   }
   return memory.get(id) ?? null;
 }
+
+/** Newest-first list of all stored reports (for the builder's Reports page). */
+export async function listReports(): Promise<StoredReport[]> {
+  let reports: StoredReport[];
+  if (blobsAvailable()) {
+    const store = getStore({ name: STORE_NAME, consistency: "strong" });
+    const { blobs } = await store.list();
+    reports = (
+      await Promise.all(
+        blobs.map(
+          async (b) => (await store.get(b.key, { type: "json" })) as StoredReport | null,
+        ),
+      )
+    ).filter((r): r is StoredReport => r != null);
+  } else {
+    reports = [...memory.values()];
+  }
+  return reports.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+}
+
+// ---------------------------------------------------------------------------
+// Generated-PDF cache (reports are immutable once final, so cache forever)
+// ---------------------------------------------------------------------------
+
+const PDF_STORE = "report-pdfs";
+const pdfMemory = new Map<string, Buffer>();
+
+export async function getCachedPdf(key: string): Promise<Buffer | null> {
+  if (blobsAvailable()) {
+    const store = getStore(PDF_STORE);
+    const data = await store.get(key, { type: "arrayBuffer" });
+    return data ? Buffer.from(data) : null;
+  }
+  return pdfMemory.get(key) ?? null;
+}
+
+export async function cachePdf(key: string, pdf: Buffer): Promise<void> {
+  if (blobsAvailable()) {
+    const store = getStore(PDF_STORE);
+    const bytes = new Uint8Array(pdf);
+    await store.set(key, new Blob([bytes]));
+    return;
+  }
+  pdfMemory.set(key, pdf);
+}
