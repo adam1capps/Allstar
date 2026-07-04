@@ -19,12 +19,20 @@ export default function HomePage() {
         Build an MC Scan moisture report and get a permanent, shareable link to
         send to the client.
       </p>
-      <Link
-        href="/builder"
-        className="mt-8 inline-flex items-center rounded-lg bg-[#C8302F] px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-[#A52529]"
-      >
-        Open the report builder →
-      </Link>
+      <div className="mt-8 flex gap-3">
+        <Link
+          href="/builder"
+          className="inline-flex items-center rounded-lg bg-[#C8302F] px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-[#A52529]"
+        >
+          Open the report builder →
+        </Link>
+        <Link
+          href="/builder/reports"
+          className="inline-flex items-center rounded-lg border border-neutral-300 bg-white px-6 py-3 text-base font-semibold text-neutral-900 shadow-sm transition hover:bg-neutral-50"
+        >
+          View reports
+        </Link>
+      </div>
       <p className="mt-10 text-sm text-slate-400">
         Reports are generated here — this app does not send anything.
       </p>

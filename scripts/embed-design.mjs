@@ -57,6 +57,23 @@ const createLinkBtn =
 builderTpl =
   builderTpl.slice(0, printBtnIdx) + createLinkBtn + builderTpl.slice(printBtnIdx);
 
+// 2b. A "Reports" link (report index + PDFs) at the end of the toolbar,
+//     styled like the outline toolbar buttons.
+{
+  const loadJobEnd = builderTpl.indexOf(
+    "</label>",
+    builderTpl.indexOf('data-action="loadJob"'),
+  );
+  if (loadJobEnd < 0) throw new Error("embed-design: load-job label not found");
+  const reportsLink =
+    ` <a href="/builder/reports" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.32);` +
+    `font:600 12px 'Open Sans',sans-serif;padding:9px 13px;border-radius:9px;cursor:pointer;text-decoration:none;">Reports</a>`;
+  builderTpl =
+    builderTpl.slice(0, loadJobEnd + "</label>".length) +
+    reportsLink +
+    builderTpl.slice(loadJobEnd + "</label>".length);
+}
+
 // 3. <sc-if value="{{key}}" ...>CONTENT</sc-if> -> CONTENT with data-if="key"
 //    on its first element (client toggles `display` from state).
 builderTpl = builderTpl.replace(
@@ -117,6 +134,21 @@ let fittedReportTpl = reportTpl;
 for (const [from, to] of sampleTextMap) {
   if (!fittedReportTpl.includes(from)) {
     throw new Error(`embed-design: expected report sample text not found: ${from}`);
+  }
+  fittedReportTpl = fittedReportTpl.replace(from, to);
+}
+
+// Evidence-photo captions become data-driven (clients can replace the photos,
+// so the labels must be editable; defaults are the design's own captions).
+const captionMap = [
+  [">Recon kit — Tramex MEX5, RWS scanner &amp; probes<", ">{{photoCap1}}<"],
+  [">On-roof reading beside a rooftop penetration<", ">{{photoCap2}}<"],
+  [">Calibrated instruments — MEX5 &amp; RWS scanner<", ">{{photoCap3}}<"],
+  [">{{roofType}} roof field<", ">{{photoCap4}}<"],
+];
+for (const [from, to] of captionMap) {
+  if (!fittedReportTpl.includes(from)) {
+    throw new Error(`embed-design: expected caption not found: ${from}`);
   }
   fittedReportTpl = fittedReportTpl.replace(from, to);
 }

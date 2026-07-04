@@ -91,10 +91,13 @@ export default function BuilderClient() {
   const [dialog, setDialog] = useState<
     | { kind: "closed" }
     | { kind: "password"; error?: string; busy?: boolean; sampleFields?: string[] }
-    | { kind: "link"; url: string; copied?: boolean }
+    | { kind: "link"; url: string; copied?: boolean; pdfReady?: boolean }
   >({ kind: "closed" });
   const passwordRef = useRef<HTMLInputElement>(null);
   const [clientFills, setClientFills] = useState(false);
+  /** When set, the builder is editing an existing report (?edit=<id>) — the
+   *  primary action saves changes to the same permanent link. */
+  const editingIdRef = useRef<string | null>(null);
 
   /** Fields still carrying the untouched sample-job content — a real report
    *  should not silently ship another building's data. */
@@ -221,6 +224,8 @@ export default function BuilderClient() {
   // ------------------------------------------------------------------- state
 
   function save() {
+    // edit-mode drafts must not clobber an in-progress new-report draft
+    if (editingIdRef.current) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(jobRef.current));
     } catch {
@@ -380,13 +385,16 @@ export default function BuilderClient() {
       if (clientFills) {
         // the client completes these via the report link — never send drafts
         payload.clientFillsFindings = true;
-        payload.analysis = "";
-        payload.diagHeadline = "";
-        payload.diagText = "";
-        payload.recommended = "";
+        if (!editingIdRef.current) {
+          payload.analysis = "";
+          payload.diagHeadline = "";
+          payload.diagText = "";
+          payload.recommended = "";
+        }
       }
-      const res = await fetch("/api/reports", {
-        method: "POST",
+      const editing = editingIdRef.current;
+      const res = await fetch(editing ? `/api/reports/${editing}` : "/api/reports", {
+        method: editing ? "PUT" : "POST",
         headers: {
           "content-type": "application/json",
           "x-builder-password": password,
@@ -407,7 +415,11 @@ export default function BuilderClient() {
       try {
         sessionStorage.setItem(PASSWORD_KEY, password);
       } catch {}
-      setDialog({ kind: "link", url: `${window.location.origin}${data.path}` });
+      setDialog({
+        kind: "link",
+        url: `${window.location.origin}${data.path}`,
+        pdfReady: editing ? data.awaitingFindings !== true : !clientFills,
+      });
     } catch {
       setDialog({
         kind: "password",
@@ -420,32 +432,72 @@ export default function BuilderClient() {
   // ------------------------------------------------------------------- mount
 
   useEffect(() => {
-    // job from ?job= (base64url JSON, as the design supported), else localStorage
-    let initial: Partial<McScanData> = {};
-    try {
-      const q = new URLSearchParams(window.location.search).get("job");
-      if (q) {
-        const j = JSON.parse(
-          decodeURIComponent(
-            escape(atob(q.replace(/-/g, "+").replace(/_/g, "/"))),
-          ),
-        );
-        if (j && typeof j === "object") initial = j;
-      }
-    } catch {}
-    if (Object.keys(initial).length === 0) {
+    const params = new URLSearchParams(window.location.search);
+
+    // editing an existing report takes precedence (?edit=<id>)
+    const editId = params.get("edit");
+    if (editId && /^[a-z0-9]{6,20}$/.test(editId)) {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/reports/${editId}`);
+          if (!res.ok) throw new Error(String(res.status));
+          const report = (await res.json()) as Record<string, unknown>;
+          const {
+            id: _id,
+            createdAt: _c,
+            updatedAt: _u,
+            clientFillsFindings,
+            findingsSubmittedAt,
+            ...data
+          } = report;
+          editingIdRef.current = editId;
+          setClientFills(clientFillsFindings === true && !findingsSubmittedAt);
+          const job = data as Partial<McScanData>;
+          ensureSections(job);
+          jobRef.current = job;
+          renderForm();
+          renderPreview();
+          // reflect edit mode in the toolbar
+          const btn = formRef.current?.querySelector('button[data-action="createLink"]');
+          if (btn) btn.textContent = "Save changes";
+        } catch {
+          window.alert("Couldn't load that report for editing — starting a new one instead.");
+          window.history.replaceState(null, "", "/builder");
+          initFresh();
+        }
+      })();
+    } else {
+      initFresh();
+    }
+
+    function initFresh() {
+      // job from ?job= (base64url JSON, as the design supported), else localStorage
+      let initial: Partial<McScanData> = {};
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const p = JSON.parse(raw);
-          if (p && typeof p === "object") initial = p;
+        const q = params.get("job");
+        if (q) {
+          const j = JSON.parse(
+            decodeURIComponent(
+              escape(atob(q.replace(/-/g, "+").replace(/_/g, "/"))),
+            ),
+          );
+          if (j && typeof j === "object") initial = j;
         }
       } catch {}
+      if (Object.keys(initial).length === 0) {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const p = JSON.parse(raw);
+            if (p && typeof p === "object") initial = p;
+          }
+        } catch {}
+      }
+      ensureSections(initial);
+      jobRef.current = initial;
+      renderForm();
+      renderPreview();
     }
-    ensureSections(initial);
-    jobRef.current = initial;
-    renderForm();
-    renderPreview();
     // web fonts change metrics — re-fit the preview once they settle
     if (document.fonts?.ready) {
       void document.fonts.ready.then(() => {
@@ -583,11 +635,12 @@ export default function BuilderClient() {
           {dialog.kind === "password" ? (
             <>
               <div style={{ font: "800 17px 'Exo',sans-serif", color: "#111" }}>
-                Create shareable link
+                {editingIdRef.current ? "Save changes" : "Create shareable link"}
               </div>
               <p style={{ margin: "8px 0 14px", fontSize: 13, color: "#555" }}>
-                This saves the report and returns a permanent link you can send
-                to the client.
+                {editingIdRef.current
+                  ? "This updates the report in place — the client's link stays the same and the PDF regenerates."
+                  : "This saves the report and returns a permanent link you can send to the client."}
               </p>
               <label
                 style={{
@@ -703,11 +756,12 @@ export default function BuilderClient() {
           ) : (
             <>
               <div style={{ font: "800 17px 'Exo',sans-serif", color: "#111" }}>
-                Permanent link created ✓
+                {editingIdRef.current ? "Changes saved ✓" : "Permanent link created ✓"}
               </div>
               <p style={{ margin: "8px 0 12px", fontSize: 13, color: "#555" }}>
-                Send this link to the client — it opens the report and prints to
-                PDF.
+                {editingIdRef.current
+                  ? "The client's existing link now shows the updated report."
+                  : "Send this link to the client — it opens the report and prints to PDF."}
               </p>
               <div
                 style={{
@@ -774,6 +828,23 @@ export default function BuilderClient() {
                 >
                   Open report
                 </a>
+                {dialog.pdfReady && (
+                  <a
+                    href={`${dialog.url}/pdf`}
+                    style={{
+                      flex: 1,
+                      textAlign: "center",
+                      background: "#C8302F",
+                      color: "#fff",
+                      font: "700 13px 'Open Sans',sans-serif",
+                      padding: "11px 15px",
+                      borderRadius: 9,
+                      textDecoration: "none",
+                    }}
+                  >
+                    Download PDF
+                  </a>
+                )}
                 <button
                   onClick={() => setDialog({ kind: "closed" })}
                   style={{

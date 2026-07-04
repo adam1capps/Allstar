@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateReportId, validateMcScanData, type StoredReport } from "@/lib/mcscan";
-import { saveReport } from "@/lib/store";
+import {
+  generateReportId,
+  isAwaitingFindings,
+  validateMcScanData,
+  type StoredReport,
+} from "@/lib/mcscan";
+import { listReports, saveReport } from "@/lib/store";
 import { BUILDER_PASSWORD_HEADER, isBuilderAuthorized } from "@/lib/auth";
 
 // Report bodies include base64 photos, so run on the Node runtime.
@@ -9,6 +14,29 @@ export const dynamic = "force-dynamic";
 
 /** Six ≤1500px JPEGs plus text comfortably fit; anything bigger is abuse. */
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
+
+/** Report index for the builder's Reports page (metadata only, no photos). */
+export async function GET(req: NextRequest) {
+  if (!isBuilderAuthorized(req.headers.get(BUILDER_PASSWORD_HEADER))) {
+    return NextResponse.json(
+      { error: "Not authorized. Check the builder password." },
+      { status: 401 },
+    );
+  }
+  const reports = await listReports();
+  return NextResponse.json({
+    reports: reports.map((r) => ({
+      id: r.id,
+      buildingName: r.buildingName,
+      address: r.address,
+      scanDate: r.scanDate,
+      preparedFor: r.preparedFor,
+      createdAt: r.createdAt,
+      awaitingFindings: isAwaitingFindings(r),
+      findingsSubmittedAt: r.findingsSubmittedAt ?? null,
+    })),
+  });
+}
 
 export async function POST(req: NextRequest) {
   if (!isBuilderAuthorized(req.headers.get(BUILDER_PASSWORD_HEADER))) {

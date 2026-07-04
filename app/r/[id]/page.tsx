@@ -97,7 +97,26 @@ export default async function ReportPage({
             Findings needed
           </span>
         ) : (
-          <PrintButton />
+          <>
+            <a
+              href={`/r/${report.id}/pdf`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                background: "#fff",
+                color: "#111",
+                border: "none",
+                font: "700 12.5px 'Open Sans',sans-serif",
+                padding: "10px 15px",
+                borderRadius: 9,
+                textDecoration: "none",
+              }}
+            >
+              Download PDF
+            </a>
+            <PrintButton />
+          </>
         )}
       </div>
 

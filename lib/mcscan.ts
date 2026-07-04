@@ -47,6 +47,11 @@ export interface McScanData {
   photo2: string;
   photo3: string;
   photo4: string;
+  // Evidence photo captions; empty string = the design's default caption
+  photoCaption1?: string;
+  photoCaption2?: string;
+  photoCaption3?: string;
+  photoCaption4?: string;
   // Findings & diagnosis
   analysis: string;
   diagHeadline: string;
@@ -57,6 +62,8 @@ export interface McScanData {
 export interface StoredReport extends McScanData {
   id: string;
   createdAt: string;
+  /** Set whenever Regina edits the report after creation. */
+  updatedAt?: string;
   /** Regina checked "client fills in the findings" when creating the link. */
   clientFillsFindings?: boolean;
   /** Set when the client saves their findings — the report is locked from then on. */
@@ -72,6 +79,28 @@ export const FINDINGS_FIELDS = [
   "recommended",
 ] as const;
 export type FindingsFields = Pick<McScanData, (typeof FINDINGS_FIELDS)[number]>;
+
+/** Optional extras a client may include with their findings: replacement
+ *  evidence photos for the four-grid and their captions. */
+export const FINDINGS_PHOTO_FIELDS = ["photo1", "photo2", "photo3", "photo4"] as const;
+export const FINDINGS_CAPTION_FIELDS = [
+  "photoCaption1",
+  "photoCaption2",
+  "photoCaption3",
+  "photoCaption4",
+] as const;
+export type FindingsSubmission = FindingsFields &
+  Partial<Pick<McScanData, (typeof FINDINGS_PHOTO_FIELDS)[number] | (typeof FINDINGS_CAPTION_FIELDS)[number]>>;
+
+/** The design's own evidence captions (photo 4's is roof-type-driven). */
+export function defaultCaptions(roofType: string): [string, string, string, string] {
+  return [
+    "Recon kit — Tramex MEX5, RWS scanner & probes",
+    "On-roof reading beside a rooftop penetration",
+    "Calibrated instruments — MEX5 & RWS scanner",
+    `${roofType} roof field`,
+  ];
+}
 
 export function isAwaitingFindings(report: StoredReport): boolean {
   return !!report.clientFillsFindings && !report.findingsSubmittedAt;
@@ -341,6 +370,10 @@ export function computeVals(data: Partial<McScanData>, opts: ComputeOptions = {}
     hasP2: !!d.photo2,
     hasP3: !!d.photo3,
     hasP4: !!d.photo4,
+    photoCap1: d.photoCaption1?.trim() || defaultCaptions(d.roofType)[0],
+    photoCap2: d.photoCaption2?.trim() || defaultCaptions(d.roofType)[1],
+    photoCap3: d.photoCaption3?.trim() || defaultCaptions(d.roofType)[2],
+    photoCap4: d.photoCaption4?.trim() || defaultCaptions(d.roofType)[3],
     coverBg: zoneBg(d.coverPhoto, "#EEF0F2", "cover"),
     overlayBg: zoneBg(d.overlayImg, "#EDEFF1", "contain"),
     p1Bg: zoneBg(d.photo1, "#F2F2F4", "cover"),
@@ -525,6 +558,16 @@ export function validateMcScanData(
     out[key] = v;
   }
 
+  for (const key of FINDINGS_CAPTION_FIELDS) {
+    const v = src[key];
+    if (v == null || v === "") continue; // empty = design default caption
+    if (typeof v !== "string" || v.length > 200) {
+      errors.push(`${key} must be text up to 200 characters.`);
+      continue;
+    }
+    out[key] = v.trim();
+  }
+
   if (
     typeof out.recommended === "string" &&
     out.recommended !== "" && // "" only occurs when findings are client-completed
@@ -537,11 +580,12 @@ export function validateMcScanData(
   return { ok: true, errors: [], value: out as unknown as McScanData };
 }
 
-/** Validates the client's findings submission (the delegated section only). */
+/** Validates the client's findings submission: the delegated text fields plus
+ *  optional replacement evidence photos and captions. */
 export function validateFindings(input: unknown): {
   ok: boolean;
   errors: string[];
-  value?: FindingsFields;
+  value?: FindingsSubmission;
 } {
   const errors: string[] = [];
   const src = (input ?? {}) as Record<string, unknown>;
@@ -565,6 +609,27 @@ export function validateFindings(input: unknown): {
     errors.push(`recommended must be one of: ${OPTION_TITLES.join(", ")}.`);
   }
 
+  // Optional replacement photos — absent/empty means "keep what the report has".
+  for (const key of FINDINGS_PHOTO_FIELDS) {
+    const v = src[key];
+    if (v == null || v === "") continue;
+    if (typeof v !== "string" || !(DATA_IMAGE_RE.test(v) || SAMPLE_PHOTO_PATHS.has(v))) {
+      errors.push(`${key} must be an uploaded image.`);
+      continue;
+    }
+    out[key] = v;
+  }
+
+  for (const key of FINDINGS_CAPTION_FIELDS) {
+    const v = src[key];
+    if (v == null || v === "") continue;
+    if (typeof v !== "string" || v.length > 200) {
+      errors.push(`${key} must be text up to 200 characters.`);
+      continue;
+    }
+    out[key] = v.trim();
+  }
+
   if (errors.length > 0) return { ok: false, errors };
-  return { ok: true, errors: [], value: out as unknown as FindingsFields };
+  return { ok: true, errors: [], value: out as unknown as FindingsSubmission };
 }
