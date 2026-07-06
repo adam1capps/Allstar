@@ -5,8 +5,12 @@ import { getReport, saveReport } from "@/lib/store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Findings are text-only — anything bigger than this is not a submission. */
-const MAX_BODY_BYTES = 64 * 1024;
+/**
+ * A findings submission carries the diagnosis text plus up to four replacement
+ * evidence photos (≤1500px JPEGs), so it is the same size class as a full
+ * report — match the create/edit cap rather than a text-only limit.
+ */
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 /**
  * The client's one-shot findings submission.
@@ -37,11 +41,22 @@ export async function POST(
     );
   }
 
+  const declared = Number(req.headers.get("content-length") ?? 0);
+  if (declared > MAX_BODY_BYTES) {
+    return NextResponse.json(
+      { error: "Submission is too large — use fewer or smaller photos." },
+      { status: 413 },
+    );
+  }
+
   let body: unknown;
   try {
     const raw = await req.text();
     if (raw.length > MAX_BODY_BYTES) {
-      return NextResponse.json({ error: "Submission is too large." }, { status: 413 });
+      return NextResponse.json(
+        { error: "Submission is too large — use fewer or smaller photos." },
+        { status: 413 },
+      );
     }
     body = JSON.parse(raw);
   } catch {
