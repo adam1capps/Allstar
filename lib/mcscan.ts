@@ -216,7 +216,7 @@ const STEPS = [
 const CREDENTIALS = [
   { k: "Serving since", v: "1979" },
   { k: "In business", v: "45+ years" },
-  { k: "Certification", v: "CertainTeed Premier ShingleMaster" },
+  { k: "Certification", v: "Elevate / Firestone & Gaco Coatings" },
   { k: "Status", v: "Licensed · Bonded · Insured" },
 ];
 
