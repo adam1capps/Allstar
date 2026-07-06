@@ -1,7 +1,7 @@
 # Allstar MC Scan Report Generator
 
 The MC Scan (Roof MRI) report builder for Allstar. Fill the form, watch the
-12-page client report update live, and click **Create shareable link** to get a
+client report update live, and click **Create shareable link** to get a
 **permanent, unique URL** to send to the client. The client's link shows the
 full styled report with **Print / Save as PDF** — every sheet is exactly one
 US-Letter page, no blank pages, no spill-over.
