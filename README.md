@@ -42,6 +42,26 @@ confirmation and **locks the report permanently** — enforced server-side
 (`409` on any later submission). No password is involved: possession of the
 unguessable link is the credential, same as viewing.
 
+### Report branding (Roof MRI vs Allstar)
+
+The 11-sheet report design is contractor-neutral in everything but its **brand
+chrome** — the logo/wordmark, the running-header name + tagline, the footer
+line, the contact block, the back-cover copy, and the single accent color.
+Those live in `lib/branding.ts` as `Brand` profiles, and the report picks one
+via an optional **`brand`** field on the report data:
+
+- **`allstar`** — the Allstar account's report (red accent, Allstar wordmark +
+  contact). This is the **default** for any brandless report, so every existing
+  report and Allstar's own builder are unchanged.
+- **`roofmri`** — the generic Roof MRI report every other contractor runs on
+  (navy accent, Roof MRI three-square mark, roof-mri.com contact). The Roof MRI
+  app sends `brand: "roofmri"` on `POST /api/reports`.
+
+Only the moisture **data** palette (wet / damp / dry) is off-limits — color
+there is state, not brand, so it never varies. Adding a contractor is a new
+entry in `BRANDS`; the shared 11-sheet layout is the single source of truth.
+The deployment default can be flipped with the `DEFAULT_REPORT_BRAND` env var.
+
 ## The design pipeline
 
 ```

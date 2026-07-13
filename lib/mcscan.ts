@@ -1,4 +1,5 @@
 import { customAlphabet } from "nanoid";
+import { getBrand, BRAND_KEYS } from "./branding";
 
 /**
  * MC Scan report data model + computed template values.
@@ -57,6 +58,10 @@ export interface McScanData {
   diagHeadline: string;
   diagText: string;
   recommended: string;
+  // Branding profile — which contractor identity the report renders in.
+  // Optional; brandless reports resolve to the deployment default (allstar).
+  // See lib/branding.ts (BRAND_KEYS).
+  brand?: string;
 }
 
 export interface StoredReport extends McScanData {
@@ -213,13 +218,6 @@ const STEPS = [
   { n: "8", t: "Licensing & permitting", d: "We handle all permits and code requirements." },
 ];
 
-const CREDENTIALS = [
-  { k: "Serving since", v: "1979" },
-  { k: "In business", v: "45+ years" },
-  { k: "Certification", v: "Elevate / Firestone & Gaco Coatings" },
-  { k: "Status", v: "Licensed · Bonded · Insured" },
-];
-
 export type TemplateValues = Record<string, unknown>;
 
 export interface ComputeOptions {
@@ -229,6 +227,11 @@ export interface ComputeOptions {
 
 export function computeVals(data: Partial<McScanData>, opts: ComputeOptions = {}): TemplateValues {
   const d: McScanData = { ...SAMPLE, ...data };
+
+  // Branding profile — feeds every {{brand.*}} token in report.html. Resolved
+  // here so all three render paths (server report page, builder preview,
+  // findings preview) pick up the same brand from the report's `brand` field.
+  const brand = getBrand(d.brand);
 
   // Per-section counts when present; otherwise the flat fields are one section.
   const scanSections: ScanSection[] =
@@ -332,7 +335,9 @@ export function computeVals(data: Partial<McScanData>, opts: ComputeOptions = {}
     scaleBands: SCALE_BANDS,
     options,
     steps: STEPS,
-    credentials: CREDENTIALS,
+    // brand chrome (logo, name, accent, contact, credentials…) — see branding.ts
+    brand,
+    credentials: brand.credentials,
     swap: "none",
     sheetBg: "linear-gradient(160deg,#ECECEE,#E3E3E6)",
     // job values
@@ -574,6 +579,16 @@ export function validateMcScanData(
     !OPTION_TITLES.includes(out.recommended as never)
   ) {
     errors.push(`recommended must be one of: ${OPTION_TITLES.join(", ")}.`);
+  }
+
+  // Branding profile — optional. Absent = the deployment default (allstar).
+  if (src.brand != null && src.brand !== "") {
+    const b = typeof src.brand === "string" ? src.brand.toLowerCase().trim() : "";
+    if (!BRAND_KEYS.includes(b)) {
+      errors.push(`brand must be one of: ${BRAND_KEYS.join(", ")}.`);
+    } else {
+      out.brand = b;
+    }
   }
 
   if (errors.length > 0) return { ok: false, errors };
